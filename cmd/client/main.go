@@ -27,6 +27,7 @@ type Product struct {
 type Client struct {
 	httpClient *http.Client
 	baseURL    string
+	token      string
 }
 
 func NewClient() *Client {
@@ -41,32 +42,70 @@ func main() {
 	reader := bufio.NewReader(os.Stdin)
 
 	fmt.Println("--- Inventory Management API Client ---")
-	fmt.Println("-------------------------------------")
 
 	for {
-		displayMenu()
+		if client.token == "" {
+			client.runLoggedOutLoop(reader)
+		} else {
+			client.runLoggedInLoop(reader)
+		}
+	}
+}
+
+func (c *Client) runLoggedOutLoop(reader *bufio.Reader) {
+	for {
+		fmt.Println("\n-------------------------------------")
+		fmt.Println("You are not logged in.")
+		fmt.Println("1. Login")
+		fmt.Println("2. Exit")
 		choice := readString(reader, "Enter your choice: ")
 
-		var err error
 		switch choice {
 		case "1":
-			err = client.addProduct(reader)
+			err := c.login(reader)
+			if err != nil {
+				log.Printf("Login failed: %v", err)
+			} else {
+				fmt.Println("\nLogin successful!")
+				return
+			}
 		case "2":
-			err = client.getProduct(reader)
-		case "3":
-			err = client.listAllProducts()
-		case "4":
-			err = client.sellProduct(reader)
-		case "5":
-			err = client.restockProduct(reader)
-		case "6":
-			err = client.updateProductPrice(reader)
-		case "7":
-			err = client.deleteProduct(reader)
-		case "8":
-			err = client.getInventoryValue()
-		case "9":
 			fmt.Println("Exiting client.")
+			os.Exit(0)
+		default:
+			fmt.Println("Invalid choice. Please select a valid option.")
+		}
+	}
+}
+
+func (c *Client) runLoggedInLoop(reader *bufio.Reader) {
+	fmt.Println("\n-------------------------------------")
+	fmt.Println("You are logged in.")
+
+	for {
+		displayLoggedInMenu()
+		choice := readString(reader, "Enter your choice: ")
+		var err error
+
+		switch choice {
+		case "1":
+			err = c.addProduct(reader)
+		case "2":
+			err = c.getProduct(reader)
+		case "3":
+			err = c.listAllProducts()
+		case "4":
+			err = c.sellProduct(reader)
+		case "5":
+			err = c.restockProduct(reader)
+		case "6":
+			err = c.updateProductPrice(reader)
+		case "7":
+			err = c.deleteProduct(reader)
+		case "8":
+			err = c.getInventoryValue()
+		case "9":
+			c.logout()
 			return
 		default:
 			fmt.Println("Invalid choice. Please select a valid option.")
@@ -79,7 +118,7 @@ func main() {
 	}
 }
 
-func displayMenu() {
+func displayLoggedInMenu() {
 	fmt.Println("\nAvailable Commands:")
 	fmt.Println("1. Add Product")
 	fmt.Println("2. Get Product by ID")
@@ -89,7 +128,75 @@ func displayMenu() {
 	fmt.Println("6. Update Product Price")
 	fmt.Println("7. Delete Product")
 	fmt.Println("8. Get Total Inventory Value")
-	fmt.Println("9. Exit")
+	fmt.Println("9. Logout")
+}
+
+func (c *Client) login(reader *bufio.Reader) error {
+	fmt.Println("\n-> Logging in...")
+	email := readString(reader, "   Enter Email: ")
+	password := readString(reader, "   Enter Password: ")
+
+	payload := map[string]string{"email": email, "password": password}
+	body, statusCode, err := c.makeRequest("POST", "/login", payload)
+	if err != nil {
+		return err
+	}
+
+	if statusCode != http.StatusOK {
+		return printErrorResponse(body)
+	}
+
+	var response struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return fmt.Errorf("failed to decode login response: %w", err)
+	}
+
+	c.token = response.Token
+	return nil
+}
+
+func (c *Client) logout() {
+	c.token = ""
+	fmt.Println("\nYou have been logged out.")
+}
+
+func (c *Client) makeRequest(method, path string, payload interface{}) ([]byte, int, error) {
+	var body io.Reader
+	if payload != nil {
+		jsonPayload, err := json.Marshal(payload)
+		if err != nil {
+			return nil, 0, err
+		}
+		body = bytes.NewBuffer(jsonPayload)
+	}
+
+	req, err := http.NewRequest(method, c.baseURL+path, body)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, err
+	}
+
+	return respBody, resp.StatusCode, nil
 }
 
 func (c *Client) addProduct(reader *bufio.Reader) error {
@@ -99,7 +206,7 @@ func (c *Client) addProduct(reader *bufio.Reader) error {
 	quantity := readInt(reader, "   Enter Quantity: ")
 
 	payload := map[string]interface{}{"name": name, "price": price, "quantity": quantity}
-	body, statusCode, err := c.makeRequest("POST", "/products", payload)
+	body, statusCode, err := c.makeRequest("POST", "/api/products", payload)
 	if err != nil {
 		return err
 	}
@@ -110,7 +217,7 @@ func (c *Client) addProduct(reader *bufio.Reader) error {
 func (c *Client) getProduct(reader *bufio.Reader) error {
 	fmt.Println("\n-> Getting a Product...")
 	id := readString(reader, "   Enter Product ID: ")
-	body, statusCode, err := c.makeRequest("GET", "/products/"+id, nil)
+	body, statusCode, err := c.makeRequest("GET", "/api/products/"+id, nil)
 	if err != nil {
 		return err
 	}
@@ -119,7 +226,7 @@ func (c *Client) getProduct(reader *bufio.Reader) error {
 
 func (c *Client) listAllProducts() error {
 	fmt.Println("\n-> Listing All Products...")
-	body, statusCode, err := c.makeRequest("GET", "/products", nil)
+	body, statusCode, err := c.makeRequest("GET", "/api/products", nil)
 	if err != nil {
 		return err
 	}
@@ -130,7 +237,7 @@ func (c *Client) listAllProducts() error {
 
 	var products []Product
 	if err := json.Unmarshal(body, &products); err != nil {
-		return fmt.Errorf("failed to decode product list: %w", err)
+		return err
 	}
 
 	fmt.Println("\n<- Server Response:")
@@ -148,18 +255,12 @@ func (c *Client) sellProduct(reader *bufio.Reader) error {
 	quantity := readInt(reader, "   Enter Quantity to Sell: ")
 
 	payload := map[string]interface{}{"quantity": quantity}
-	body, statusCode, err := c.makeRequest("POST", fmt.Sprintf("/products/%s/sell", id), payload)
+	body, statusCode, err := c.makeRequest("POST", fmt.Sprintf("/api/products/%s/sell", id), payload)
 	if err != nil {
 		return err
 	}
 
-	if statusCode != http.StatusOK {
-		return printErrorResponse(body)
-	}
-
-	fmt.Println("\n<- Server Response:")
-	fmt.Println("   Sale processed successfully.")
-	return nil
+	return handleProductResponse(body, statusCode, "Sale processed successfully.")
 }
 
 func (c *Client) restockProduct(reader *bufio.Reader) error {
@@ -168,18 +269,11 @@ func (c *Client) restockProduct(reader *bufio.Reader) error {
 	quantity := readInt(reader, "   Enter Quantity to Restock: ")
 
 	payload := map[string]interface{}{"quantity": quantity}
-	body, statusCode, err := c.makeRequest("POST", fmt.Sprintf("/products/%s/restock", id), payload)
+	body, statusCode, err := c.makeRequest("POST", fmt.Sprintf("/api/products/%s/restock", id), payload)
 	if err != nil {
 		return err
 	}
-
-	if statusCode != http.StatusOK {
-		return printErrorResponse(body)
-	}
-
-	fmt.Println("\n<- Server Response:")
-	fmt.Println("   Product restocked successfully.")
-	return nil
+	return handleProductResponse(body, statusCode, "Product restocked successfully.")
 }
 
 func (c *Client) updateProductPrice(reader *bufio.Reader) error {
@@ -188,36 +282,27 @@ func (c *Client) updateProductPrice(reader *bufio.Reader) error {
 	price := readFloat(reader, "   Enter New Price: ")
 
 	payload := map[string]interface{}{"price": price}
-	body, statusCode, err := c.makeRequest("PUT", fmt.Sprintf("/products/%s/price", id), payload)
+	body, statusCode, err := c.makeRequest("PUT", fmt.Sprintf("/api/products/%s/price", id), payload)
 	if err != nil {
 		return err
 	}
 
-	return handleProductResponse(body, statusCode, "Price updated successfully.")
+	return handleMessageResponse(body, statusCode, "Price updated successfully.")
 }
 
 func (c *Client) deleteProduct(reader *bufio.Reader) error {
 	fmt.Println("\n-> Deleting a Product...")
 	id := readString(reader, "   Enter Product ID to Delete: ")
-	body, statusCode, err := c.makeRequest("DELETE", "/products/"+id, nil)
+	body, statusCode, err := c.makeRequest("DELETE", "/api/products/"+id, nil)
 	if err != nil {
 		return err
 	}
-
-	if statusCode == http.StatusNoContent {
-		fmt.Println("\n<- Server Response:\nProduct deleted successfully.")
-		return nil
-	}
-	if statusCode != http.StatusOK {
-		return printErrorResponse(body)
-	}
-
-	return printMessageResponse(body)
+	return handleMessageResponse(body, statusCode, "Product deleted successfully.")
 }
 
 func (c *Client) getInventoryValue() error {
 	fmt.Println("\n-> Getting Total Inventory Value...")
-	body, statusCode, err := c.makeRequest("GET", "/inventory/value", nil)
+	body, statusCode, err := c.makeRequest("GET", "/api/inventory/value", nil)
 	if err != nil {
 		return err
 	}
@@ -227,47 +312,15 @@ func (c *Client) getInventoryValue() error {
 	}
 
 	var result struct {
-		TotalValue float64 `json:"total_value"`
+		Value float64 `json:"inventory_value"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
-		return fmt.Errorf("failed to decode inventory value: %w", err)
+		return err
 	}
 
 	fmt.Println("\n<- Server Response:")
-	fmt.Printf("   Total Inventory Value: $%.2f\n", result.TotalValue)
+	fmt.Printf("   Total Inventory Value: $%.2f\n", result.Value)
 	return nil
-}
-
-func (c *Client) makeRequest(method, path string, payload interface{}) ([]byte, int, error) {
-	var body io.Reader
-	if payload != nil {
-		jsonPayload, err := json.Marshal(payload)
-		if err != nil {
-			return nil, 0, fmt.Errorf("failed to marshal JSON payload: %w", err)
-		}
-		body = bytes.NewBuffer(jsonPayload)
-	}
-
-	req, err := http.NewRequest(method, c.baseURL+path, body)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to create request: %w", err)
-	}
-	if payload != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, 0, fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, resp.StatusCode, fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	return respBody, resp.StatusCode, nil
 }
 
 func printProductsTable(products []Product) {
@@ -275,8 +328,7 @@ func printProductsTable(products []Product) {
 	fmt.Fprintln(writer, "ID\tNAME\tPRICE\tQUANTITY")
 	fmt.Fprintln(writer, "--\t----\t-----\t--------")
 	for _, p := range products {
-		fmt.Fprintf(writer, "%s\t%s\t$%.2f\t%d\n",
-			p.ID, p.Name, p.Price, p.Quantity)
+		fmt.Fprintf(writer, "%s\t%s\t$%.2f\t%d\n", p.ID, p.Name, p.Price, p.Quantity)
 	}
 	writer.Flush()
 }
@@ -287,7 +339,7 @@ func handleProductResponse(body []byte, statusCode int, successMessage string) e
 	}
 	var product Product
 	if err := json.Unmarshal(body, &product); err != nil {
-		return fmt.Errorf("failed to decode product: %w", err)
+		return err
 	}
 
 	fmt.Println("\n<- Server Response:")
@@ -298,32 +350,29 @@ func handleProductResponse(body []byte, statusCode int, successMessage string) e
 	return nil
 }
 
-func printErrorResponse(body []byte) error {
-	var errorResponse struct {
-		Error string `json:"error"`
+func handleMessageResponse(body []byte, statusCode int, defaultMessage string) error {
+	if statusCode != http.StatusOK {
+		return printErrorResponse(body)
 	}
-	if err := json.Unmarshal(body, &errorResponse); err == nil && errorResponse.Error != "" {
-		fmt.Printf("\n Error from server: %s\n", errorResponse.Error)
-		return fmt.Errorf("server returned an error")
-	}
-
-	rawError := strings.TrimSpace(string(body))
-	if rawError != "" {
-		fmt.Printf("\n An unknown error occurred: %s\n", rawError)
-	}
-	return fmt.Errorf("server returned a non-2xx status code with an unhandled error format")
-}
-
-func printMessageResponse(body []byte) error {
 	var response struct {
 		Message string `json:"message"`
 	}
 	if err := json.Unmarshal(body, &response); err == nil && response.Message != "" {
-		fmt.Printf("\n<- Server Response:\n%s\n", response.Message)
-		return nil
+		fmt.Printf("\n<- Server Response:\n   %s\n", response.Message)
+	} else {
+		fmt.Printf("\n<- Server Response:\n   %s\n", defaultMessage)
 	}
-	fmt.Printf("\n<- Server Response:\n%s\n", string(body))
 	return nil
+}
+
+func printErrorResponse(body []byte) error {
+	var errResp struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(body, &errResp); err == nil && errResp.Error != "" {
+		return fmt.Errorf("server error: %s", errResp.Error)
+	}
+	return fmt.Errorf("unknown server error: %s", string(body))
 }
 
 func readString(reader *bufio.Reader, prompt string) string {
