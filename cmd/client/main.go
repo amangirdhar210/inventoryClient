@@ -153,7 +153,13 @@ func (c *Client) sellProduct(reader *bufio.Reader) error {
 		return err
 	}
 
-	return handleProductResponse(body, statusCode, "Sale processed successfully.")
+	if statusCode != http.StatusOK {
+		return printErrorResponse(body)
+	}
+
+	fmt.Println("\n<- Server Response:")
+	fmt.Println("   Sale processed successfully.")
+	return nil
 }
 
 func (c *Client) restockProduct(reader *bufio.Reader) error {
@@ -167,7 +173,13 @@ func (c *Client) restockProduct(reader *bufio.Reader) error {
 		return err
 	}
 
-	return handleProductResponse(body, statusCode, "Product restocked successfully.")
+	if statusCode != http.StatusOK {
+		return printErrorResponse(body)
+	}
+
+	fmt.Println("\n<- Server Response:")
+	fmt.Println("   Product restocked successfully.")
+	return nil
 }
 
 func (c *Client) updateProductPrice(reader *bufio.Reader) error {
