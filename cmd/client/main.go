@@ -162,7 +162,7 @@ func (c *Client) logout() {
 	fmt.Println("\nYou have been logged out.")
 }
 
-func (c *Client) makeRequest(method, path string, payload interface{}) ([]byte, int, error) {
+func (c *Client) makeRequest(method, path string, payload any) ([]byte, int, error) {
 	var body io.Reader
 	if payload != nil {
 		jsonPayload, err := json.Marshal(payload)
@@ -205,7 +205,7 @@ func (c *Client) addProduct(reader *bufio.Reader) error {
 	price := readFloat(reader, "   Enter Price: ")
 	quantity := readInt(reader, "   Enter Quantity: ")
 
-	payload := map[string]interface{}{"name": name, "price": price, "quantity": quantity}
+	payload := map[string]any{"name": name, "price": price, "quantity": quantity}
 	body, statusCode, err := c.makeRequest("POST", "/api/products", payload)
 	if err != nil {
 		return err
@@ -254,8 +254,8 @@ func (c *Client) sellProduct(reader *bufio.Reader) error {
 	id := readString(reader, "   Enter Product ID: ")
 	quantity := readInt(reader, "   Enter Quantity to Sell: ")
 
-	payload := map[string]interface{}{"quantity": quantity}
-	body, statusCode, err := c.makeRequest("POST", fmt.Sprintf("/api/products/%s/sell", id), payload)
+	payload := map[string]any{"quantity": quantity}
+	body, statusCode, err := c.makeRequest("PATCH", fmt.Sprintf("/api/products/%s/sell", id), payload)
 	if err != nil {
 		return err
 	}
@@ -268,8 +268,8 @@ func (c *Client) restockProduct(reader *bufio.Reader) error {
 	id := readString(reader, "   Enter Product ID: ")
 	quantity := readInt(reader, "   Enter Quantity to Restock: ")
 
-	payload := map[string]interface{}{"quantity": quantity}
-	body, statusCode, err := c.makeRequest("POST", fmt.Sprintf("/api/products/%s/restock", id), payload)
+	payload := map[string]any{"quantity": quantity}
+	body, statusCode, err := c.makeRequest("PATCH", fmt.Sprintf("/api/products/%s/restock", id), payload)
 	if err != nil {
 		return err
 	}
@@ -281,8 +281,8 @@ func (c *Client) updateProductPrice(reader *bufio.Reader) error {
 	id := readString(reader, "   Enter Product ID: ")
 	price := readFloat(reader, "   Enter New Price: ")
 
-	payload := map[string]interface{}{"price": price}
-	body, statusCode, err := c.makeRequest("PUT", fmt.Sprintf("/api/products/%s/price", id), payload)
+	payload := map[string]any{"price": price}
+	body, statusCode, err := c.makeRequest("PATCH", fmt.Sprintf("/api/products/%s/price", id), payload)
 	if err != nil {
 		return err
 	}
@@ -346,7 +346,6 @@ func handleProductResponse(body []byte, statusCode int, successMessage string) e
 	if successMessage != "" {
 		fmt.Printf("   %s\n", successMessage)
 	}
-	printProductsTable([]Product{product})
 	return nil
 }
 
